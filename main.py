@@ -18,9 +18,22 @@ def chat_with_gpt(text):
     return response['choices'][0]['message']['content']
 
 def handle_message(update: Update, context: CallbackContext):
-    user_message = update.message.text
-    chatgpt_reply = chat_with_gpt(user_message)
-    update.message.reply_text(chatgpt_reply)
+    message = update.message
+
+    # Nếu trong group hoặc supergroup mà không tag bot => bỏ qua
+    if message.chat.type in ['group', 'supergroup']:
+        bot_username = context.bot.username
+        if f"@{bot_username}" not in message.text:
+            return
+
+    # Bỏ phần @botname trong tin nhắn (nếu có)
+    user_message = message.text.replace(f"@{context.bot.username}", "").strip()
+    
+    try:
+        chatgpt_reply = chat_with_gpt(user_message)
+        message.reply_text(chatgpt_reply)
+    except Exception as e:
+        message.reply_text("⚠️ Lỗi xử lý: " + str(e))
 
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
