@@ -7,47 +7,47 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Lưu lịch sử và người đã từng tương tác
-conversation_history = {}
+# Lưu người dùng đã từng tag bot
 first_time_users = set()
+# Lưu lịch sử chat theo user
+conversation_history = {}
 
-def chat_with_gpt(user_id, user_message):
+def chat_with_gpt(user_id, message):
     history = conversation_history.get(user_id, [])
-    history.append({"role": "user", "content": user_message})
+    history.append({"role": "user", "content": message})
 
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=history
     )
-
-    reply = response['choices'][0]['message']['content']
+    reply = response.choices[0].message.content
     history.append({"role": "assistant", "content": reply})
     conversation_history[user_id] = history[-10:]
-
     return reply
 
 def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
-    user_message = message.text or ""
+    user_text = message.text or ""
     bot_username = context.bot.username
 
     is_group = message.chat.type in ['group', 'supergroup']
-    is_tagged = f"@{bot_username}" in user_message
-    is_replied_to_bot = (
+    is_tagged = f"@{bot_username}" in user_text
+    is_reply_to_bot = (
         message.reply_to_message and
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # Chỉ phản hồi khi tag bot hoặc reply bot trong group
-    if is_group and not is_tagged and not is_replied_to_bot:
+    # Trong nhóm, nếu không tag hoặc không reply bot thì bỏ qua
+    if is_group and not is_tagged and not is_reply_to_bot:
         return
 
+    # Nếu có tag thì loại bỏ để giữ nội dung gốc
     if is_tagged:
-        user_message = user_message.replace(f"@{bot_username}", "").strip()
+        user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
-        # ✅ Nếu là lần đầu → gửi chào đặc biệt, không gọi GPT
+        # Nếu là lần đầu → chỉ gửi câu chào
         if user_id not in first_time_users:
             first_time_users.add(user_id)
             message.reply_text(
@@ -56,12 +56,15 @@ def handle_message(update: Update, context: CallbackContext):
             )
             return
 
-        # ✅ Những lần sau → gọi GPT
-        reply = chat_with_gpt(user_id, user_message)
-        message.reply_text(reply, reply_to_message_id=message.message_id)
+        # Nếu không phải lần đầu → gọi GPT
+        reply = chat_with_gpt(user_id, user_text)
+        message.reply_text(
+            reply,
+            reply_to_message_id=message.message_id
+        )
 
     except Exception as e:
-        message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
+        message.reply_text("⚠️ Đã có lỗi xảy ra: " + str(e))
 
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
