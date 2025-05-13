@@ -49,7 +49,7 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # 👉 Nếu ở trong group mà không tag và cũng không phải reply bot → bỏ qua
+    # 👉 Nếu ở group mà không tag và không reply bot → bỏ qua
     if is_group and not is_tagged and not is_replied_to_bot:
         return
 
@@ -58,12 +58,22 @@ def handle_message(update: Update, context: CallbackContext):
         user_message = user_message.replace(f"@{bot_username}", "").strip()
 
     try:
-        chatgpt_reply = chat_with_gpt(user_id, user_message)
+        # ✅ Trả lời riêng nếu đây là lần đầu người này tag bot
+        if user_id not in first_time_users:
+            first_time_users.add(user_id)
+            message.reply_text(
+                "🖐️ Xin chào ní! Tôi là trợ lý của anh Huân, bạn cần hỗ trợ gì nào?",
+                reply_to_message_id=message.message_id
+            )
+            return  # Không gọi ChatGPT trong lần đầu
 
+        # Các lần sau thì gọi ChatGPT như bình thường
+        chatgpt_reply = chat_with_gpt(user_id, user_message)
         message.reply_text(
             chatgpt_reply,
             reply_to_message_id=message.message_id
         )
+
     except Exception as e:
         message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
 
