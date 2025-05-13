@@ -1,30 +1,25 @@
 import os
 import openai
 import random
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CommandHandler, CallbackContext
 
+# Lấy token từ biến môi trường
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
+# Ghi nhớ người dùng và lịch sử hội thoại
 first_time_users = set()
 conversation_history = {}
 
+# Sticker vui
 STICKERS = [
     "CAACAgUAAxkBAAEKoHhlg1I4Q2w4o0zMSrcjC3fycqQZlwACRQEAApbW6FYttxIfTrbN6jQE",
     "CAACAgUAAxkBAAEKoH1lg1JY1LtONXyA-VOFe4LEBd6gxgACawEAApbW6FYP4EL9Hx_aVjQE"
 ]
 
-def get_main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            ["📦 Còn hàng không?", "🧾 Hướng dẫn mua"],
-            ["📍 Địa chỉ cửa hàng", "🎨 Vẽ hình"]
-        ],
-        resize_keyboard=True
-    )
-
+# Trả lời bằng ChatGPT
 def chat_with_gpt(user_id, message):
     base_prompt = {
         "role": "system",
@@ -48,11 +43,40 @@ def chat_with_gpt(user_id, message):
     conversation_history[user_id] = history[-50:]
     return reply
 
+# Lệnh /reset
 def reset_history(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     conversation_history.pop(user_id, None)
-    update.message.reply_text("🧹 Đã xoá lịch sử. Mình bắt đầu lại từ đầu nha~", reply_markup=get_main_menu())
+    update.message.reply_text("🧹 Đã xoá sạch lịch sử rồi nghen~ Gõ gì đó thử đi!")
 
+# Lệnh /draw để tạo ảnh AI từ DALL·E
+def draw_image(update: Update, context: CallbackContext):
+    prompt = " ".join(context.args)
+
+    if not prompt:
+        update.message.reply_text("🎨 Gõ nội dung cần vẽ như `/draw mèo mặc áo mưa` nha~", quote=True)
+        return
+
+    try:
+        update.message.reply_text("🖌️ Đợi xíu tui vẽ hình xịn cho nè...", quote=True)
+
+        response = openai.Image.create(
+            prompt=prompt,
+            n=1,
+            size="512x512"
+        )
+
+        image_url = response["data"][0]["url"]
+        context.bot.send_photo(
+            chat_id=update.message.chat.id,
+            photo=image_url,
+            reply_to_message_id=update.message.message_id
+        )
+
+    except Exception as e:
+        update.message.reply_text(f"❌ Lỗi vẽ hình: {e}")
+
+# Xử lý tin nhắn văn bản thường
 def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
@@ -73,30 +97,19 @@ def handle_message(update: Update, context: CallbackContext):
         user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
+        # Ghi nhận người dùng mới
         if user_id not in first_time_users:
             first_time_users.add(user_id)
 
-        # Phản hồi chào nếu user nói hi/hello/chào...
-        greeting_keywords = ["hi", "hello", "chào", "yo", "hê", "hey", "alo"]
-        if user_text.lower() in greeting_keywords:
+        # 👋 Nếu là lời chào
+        if user_text.lower() in ["hi", "hello", "chào", "yo", "alo", "hey", "hê"]:
             message.reply_text(
                 "👋 Chào ní! Tôi là trợ lý Gen Z của anh Huân nè 👀",
-                reply_to_message_id=message.message_id,
-                reply_markup=get_main_menu()
-            )
-            return
-
-        # Gửi ảnh nếu có từ khóa "vẽ", "hình ảnh", "minh hoạ"
-        if any(kw in user_text.lower() for kw in ["vẽ", "hình ảnh", "minh họa", "minh hoạ"]):
-            message.reply_text("🎨 Đây nè, hình minh họa sương sương cho bạn~", reply_to_message_id=message.message_id)
-            context.bot.send_photo(
-                chat_id=message.chat.id,
-                photo="https://i.imgur.com/uX5BHoV.jpg",  # ảnh mèo thật
                 reply_to_message_id=message.message_id
             )
             return
 
-        # Gửi sticker nếu người dùng nói đùa
+        # 😂 Nếu là tin troll → gửi sticker
         if any(word in user_text.lower() for word in ["=))", "haha", "kkk", ":v", "🤣", "troll", "đùa"]):
             context.bot.send_sticker(
                 chat_id=message.chat.id,
@@ -104,27 +117,20 @@ def handle_message(update: Update, context: CallbackContext):
                 reply_to_message_id=message.message_id
             )
 
-        # Nếu nhấn nút menu → xử lý đặc biệt
-        if user_text == "📦 Tác vụ nhanh":
-            message.reply_text("Tính năng mới sẽ update sau", reply_to_message_id=message.message_id)
-            return
-      
-        elif user_text == "🎨 Vẽ hình":
-            message.reply_text("Bạn muốn vẽ gì nè? Gõ thêm ví dụ: 'vẽ con mèo' nha~", reply_to_message_id=message.message_id)
-            return
-
-        # Trả lời bằng GPT
+        # 🤖 Trả lời bằng ChatGPT
         reply = chat_with_gpt(user_id, user_text)
-        message.reply_text(reply, reply_to_message_id=message.message_id, reply_markup=get_main_menu())
+        message.reply_text(reply, reply_to_message_id=message.message_id)
 
     except Exception as e:
         message.reply_text(f"⚠️ Lỗi rồi nè: {str(e)}", reply_to_message_id=message.message_id)
 
+# Chạy bot
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("reset", reset_history))
+    dp.add_handler(CommandHandler("draw", draw_image))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
     updater.start_polling()
