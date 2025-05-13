@@ -3,12 +3,10 @@ import openai
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
-# Lấy API keys từ biến môi trường
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Bộ nhớ: người đã từng được chào và lịch sử chat theo user_id
 first_time_users = set()
 conversation_history = {}
 
@@ -21,9 +19,9 @@ def chat_with_gpt(user_id, message):
         messages=history
     )
 
-    reply = response.choices[0].message.content
+    reply = response.choices[0].message.content.strip()
     history.append({"role": "assistant", "content": reply})
-    conversation_history[user_id] = history[-10:]
+    conversation_history[user_id] = history[-50:]  # lưu tối đa 50 lượt
     return reply
 
 def handle_message(update: Update, context: CallbackContext):
@@ -39,31 +37,37 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # Trong group: nếu không tag và không reply bot thì bỏ qua
     if is_group and not is_tagged and not is_reply_to_bot:
         return
 
-    # Xoá tag nếu có
     if is_tagged:
         user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
-        # ✅ Nếu là lần đầu → gửi chào rồi vẫn xử lý tiếp nội dung
         if user_id not in first_time_users:
             first_time_users.add(user_id)
-            message.reply_text(
-                "👋 Xin chào ní! Tôi là trợ lý của anh Huân, bạn cần hỗ trợ gì nào?",
-                reply_to_message_id=message.message_id
-            )
-            # ⚠️ Không return tại đây → vẫn tiếp tục xử lý nội dung bên dưới
 
-        # Gửi qua ChatGPT như bình thường
+            if user_text.strip() == "":
+                message.reply_text(
+                    "🖐️ Chào ní! Tôi là trợ lý Gen Z của anh Huân, hỏi gì đê~",
+                    reply_to_message_id=message.message_id
+                )
+                return
+            else:
+                # 👇 Gửi chào + trả lời trong cùng 1 tin
+                reply = chat_with_gpt(user_id, user_text)
+                message.reply_text(
+                    f"🖐️ Chào ní! Tôi là trợ lý Gen Z của anh Huân nè 👀\n💬 {reply}",
+                    reply_to_message_id=message.message_id
+                )
+                return
+
+        # Các lần sau → chỉ trả lời
         reply = chat_with_gpt(user_id, user_text)
         message.reply_text(reply, reply_to_message_id=message.message_id)
 
     except Exception as e:
-        message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
-
+        message.reply_text("⚠️ Lỗi nè: " + str(e), reply_to_message_id=message.message_id)
 
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
