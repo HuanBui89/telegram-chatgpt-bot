@@ -1,19 +1,21 @@
 import os
-import openai
 from telegram import Update, Bot
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
+from openai import OpenAI
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def chat_with_gpt(text):
-    response = openai.ChatCompletion.create(
+    chat = client.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "user", "content": text}]
+        messages=[
+            {"role": "user", "content": text}
+        ]
     )
-    return response['choices'][0]['message']['content']
+    return chat.choices[0].message.content
 
 def handle_message(update: Update, context: CallbackContext):
     user_message = update.message.text
