@@ -39,30 +39,31 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # ✅ Trong group: nếu không tag bot và không reply vào bot → bỏ qua
+    # Trong group: nếu không tag và không reply bot thì bỏ qua
     if is_group and not is_tagged and not is_reply_to_bot:
         return
 
-    # ✅ Nếu có tag bot → xoá phần tag
+    # Xoá tag nếu có
     if is_tagged:
         user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
-        # ✅ Lần đầu người dùng nhắn → gửi lời chào
+        # ✅ Nếu là lần đầu → gửi chào rồi vẫn xử lý tiếp nội dung
         if user_id not in first_time_users:
             first_time_users.add(user_id)
             message.reply_text(
-                "🖐️ Xin chào ní! Tôi là trợ lý của anh Huân, bạn cần hỗ trợ gì nào?",
+                "👋 Xin chào ní! Tôi là trợ lý của anh Huân, bạn cần hỗ trợ gì nào?",
                 reply_to_message_id=message.message_id
             )
-            return
+            # ⚠️ Không return tại đây → vẫn tiếp tục xử lý nội dung bên dưới
 
-        # ✅ Những lần sau → dùng GPT và nhớ lịch sử theo user_id
+        # Gửi qua ChatGPT như bình thường
         reply = chat_with_gpt(user_id, user_text)
         message.reply_text(reply, reply_to_message_id=message.message_id)
 
     except Exception as e:
         message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
+
 
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
