@@ -38,35 +38,34 @@ def chat_with_gpt(user_id, user_message):
 def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
-    user_message = message.text
+    user_message = message.text or ""
 
-    # Kiểm tra nếu bot đang trong group
-    if message.chat.type in ['group', 'supergroup']:
-        bot_username = context.bot.username
+    bot_username = context.bot.username
 
-        tagged = f"@{bot_username}" in message.text
-        replied_to_bot = (
-            message.reply_to_message
-            and message.reply_to_message.from_user.username == bot_username
-        )
+    is_group = message.chat.type in ['group', 'supergroup']
+    is_tagged = f"@{bot_username}" in user_message
+    is_replied_to_bot = (
+        message.reply_to_message and
+        message.reply_to_message.from_user.username == bot_username
+    )
 
-        # Nếu không được tag và cũng không phải reply vào bot thì bỏ qua
-        if not tagged and not replied_to_bot:
-            return
+    # 👉 Nếu ở trong group mà không tag và cũng không phải reply bot → bỏ qua
+    if is_group and not is_tagged and not is_replied_to_bot:
+        return
 
-        # Nếu có tag thì xoá tag khỏi nội dung
+    # Nếu có tag thì xoá phần @bot để lấy nội dung sạch
+    if is_tagged:
         user_message = user_message.replace(f"@{bot_username}", "").strip()
 
     try:
         chatgpt_reply = chat_with_gpt(user_id, user_message)
 
-        # Phản hồi trực tiếp vào tin nhắn
         message.reply_text(
             chatgpt_reply,
             reply_to_message_id=message.message_id
         )
     except Exception as e:
-        message.reply_text("⚠️ Lỗi xử lý: " + str(e), reply_to_message_id=message.message_id)
+        message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
 
 
 # Khởi động bot
