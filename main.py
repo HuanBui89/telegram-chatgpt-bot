@@ -3,39 +3,29 @@ import openai
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
-# Token từ biến môi trường
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-
-# Cấu hình OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# Lưu lịch sử chat (bộ nhớ RAM) theo user_id
+# Lưu lịch sử và người đã từng tương tác
 conversation_history = {}
-
-# Gọi API ChatGPT có lưu lịch sử đối thoại
 first_time_users = set()
+
 def chat_with_gpt(user_id, user_message):
     history = conversation_history.get(user_id, [])
-
-    # Thêm câu hỏi người dùng vào lịch sử
     history.append({"role": "user", "content": user_message})
 
-    # Gửi toàn bộ đoạn chat lên GPT
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",  # hoặc gpt-4 nếu bạn có quyền
+        model="gpt-3.5-turbo",
         messages=history
     )
 
     reply = response['choices'][0]['message']['content']
-
-    # Ghi lại câu trả lời từ bot
     history.append({"role": "assistant", "content": reply})
-    conversation_history[user_id] = history[-10:]  # Giữ tối đa 10 đoạn gần nhất
+    conversation_history[user_id] = history[-10:]
 
     return reply
 
-# Hàm xử lý tin nhắn Telegram
 def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
@@ -49,16 +39,15 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # Bỏ qua nếu trong group mà không tag hoặc không reply vào bot
+    # Chỉ phản hồi khi tag bot hoặc reply bot trong group
     if is_group and not is_tagged and not is_replied_to_bot:
         return
 
-    # Xoá @bot khỏi tin nhắn để lấy nội dung gốc
     if is_tagged:
         user_message = user_message.replace(f"@{bot_username}", "").strip()
 
     try:
-        # ✅ Trả lời chào đặc biệt nếu là lần đầu
+        # ✅ Nếu là lần đầu → gửi chào đặc biệt, không gọi GPT
         if user_id not in first_time_users:
             first_time_users.add(user_id)
             message.reply_text(
@@ -67,22 +56,16 @@ def handle_message(update: Update, context: CallbackContext):
             )
             return
 
-        # ✅ Những lần sau thì trả lời bằng GPT
-        chatgpt_reply = chat_with_gpt(user_id, user_message)
-        message.reply_text(
-            chatgpt_reply,
-            reply_to_message_id=message.message_id
-        )
+        # ✅ Những lần sau → gọi GPT
+        reply = chat_with_gpt(user_id, user_message)
+        message.reply_text(reply, reply_to_message_id=message.message_id)
 
     except Exception as e:
         message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
 
-
-# Khởi động bot
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
-
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
     updater.start_polling()
     updater.idle()
