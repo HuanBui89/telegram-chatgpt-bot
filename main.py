@@ -14,6 +14,7 @@ openai.api_key = OPENAI_API_KEY
 conversation_history = {}
 
 # Gọi API ChatGPT có lưu lịch sử đối thoại
+first_time_users = set()
 def chat_with_gpt(user_id, user_message):
     history = conversation_history.get(user_id, [])
 
@@ -39,7 +40,6 @@ def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
     user_message = message.text or ""
-
     bot_username = context.bot.username
 
     is_group = message.chat.type in ['group', 'supergroup']
@@ -49,25 +49,25 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # 👉 Nếu ở group mà không tag và không reply bot → bỏ qua
+    # Bỏ qua nếu trong group mà không tag hoặc không reply vào bot
     if is_group and not is_tagged and not is_replied_to_bot:
         return
 
-    # Nếu có tag thì xoá phần @bot để lấy nội dung sạch
+    # Xoá @bot khỏi tin nhắn để lấy nội dung gốc
     if is_tagged:
         user_message = user_message.replace(f"@{bot_username}", "").strip()
 
     try:
-        # ✅ Trả lời riêng nếu đây là lần đầu người này tag bot
+        # ✅ Trả lời chào đặc biệt nếu là lần đầu
         if user_id not in first_time_users:
             first_time_users.add(user_id)
             message.reply_text(
                 "🖐️ Xin chào ní! Tôi là trợ lý của anh Huân, bạn cần hỗ trợ gì nào?",
                 reply_to_message_id=message.message_id
             )
-            return  # Không gọi ChatGPT trong lần đầu
+            return
 
-        # Các lần sau thì gọi ChatGPT như bình thường
+        # ✅ Những lần sau thì trả lời bằng GPT
         chatgpt_reply = chat_with_gpt(user_id, user_message)
         message.reply_text(
             chatgpt_reply,
