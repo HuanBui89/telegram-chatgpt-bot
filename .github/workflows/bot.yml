@@ -1,23 +1,28 @@
 name: Telegram ChatGPT Bot
 
 on:
-  workflow_dispatch:
   push:
-  schedule:
-    - cron: '*/10 * * * *'  # Cứ 10 phút restart 1 lần
+    branches:
+      - main
+  workflow_dispatch:
+
+# ✅ Giới hạn chỉ chạy 1 phiên bản duy nhất
+concurrency:
+  group: telegram-bot-control
+  cancel-in-progress: true
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 354  # gần 6 tiếng - giới hạn GitHub Free
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
@@ -28,5 +33,4 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          python main.py
+        run: python main.py
