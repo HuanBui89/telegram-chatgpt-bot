@@ -3,13 +3,13 @@ import openai
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
+# Lấy API keys từ biến môi trường
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Lưu người dùng đã từng tag bot
+# Bộ nhớ: người đã từng được chào và lịch sử chat theo user_id
 first_time_users = set()
-# Lưu lịch sử chat theo user
 conversation_history = {}
 
 def chat_with_gpt(user_id, message):
@@ -20,6 +20,7 @@ def chat_with_gpt(user_id, message):
         model="gpt-3.5-turbo",
         messages=history
     )
+
     reply = response.choices[0].message.content
     history.append({"role": "assistant", "content": reply})
     conversation_history[user_id] = history[-10:]
@@ -38,16 +39,16 @@ def handle_message(update: Update, context: CallbackContext):
         message.reply_to_message.from_user.username == bot_username
     )
 
-    # Trong nhóm, nếu không tag hoặc không reply bot thì bỏ qua
+    # ✅ Trong group: nếu không tag bot và không reply vào bot → bỏ qua
     if is_group and not is_tagged and not is_reply_to_bot:
         return
 
-    # Nếu có tag thì loại bỏ để giữ nội dung gốc
+    # ✅ Nếu có tag bot → xoá phần tag
     if is_tagged:
         user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
-        # Nếu là lần đầu → chỉ gửi câu chào
+        # ✅ Lần đầu người dùng nhắn → gửi lời chào
         if user_id not in first_time_users:
             first_time_users.add(user_id)
             message.reply_text(
@@ -56,15 +57,12 @@ def handle_message(update: Update, context: CallbackContext):
             )
             return
 
-        # Nếu không phải lần đầu → gọi GPT
+        # ✅ Những lần sau → dùng GPT và nhớ lịch sử theo user_id
         reply = chat_with_gpt(user_id, user_text)
-        message.reply_text(
-            reply,
-            reply_to_message_id=message.message_id
-        )
+        message.reply_text(reply, reply_to_message_id=message.message_id)
 
     except Exception as e:
-        message.reply_text("⚠️ Đã có lỗi xảy ra: " + str(e))
+        message.reply_text("⚠️ Lỗi: " + str(e), reply_to_message_id=message.message_id)
 
 def main():
     updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
