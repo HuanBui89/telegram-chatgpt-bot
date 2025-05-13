@@ -38,26 +38,36 @@ def chat_with_gpt(user_id, user_message):
 def handle_message(update: Update, context: CallbackContext):
     message = update.message
     user_id = message.from_user.id
+    user_message = message.text
 
-    # Nếu là group, chỉ phản hồi khi có tag @botname
+    # Kiểm tra nếu bot đang trong group
     if message.chat.type in ['group', 'supergroup']:
         bot_username = context.bot.username
-        if f"@{bot_username}" not in message.text:
+
+        tagged = f"@{bot_username}" in message.text
+        replied_to_bot = (
+            message.reply_to_message
+            and message.reply_to_message.from_user.username == bot_username
+        )
+
+        # Nếu không được tag và cũng không phải reply vào bot thì bỏ qua
+        if not tagged and not replied_to_bot:
             return
 
-    # Loại bỏ @botname khỏi nội dung
-    user_message = message.text.replace(f"@{context.bot.username}", "").strip()
+        # Nếu có tag thì xoá tag khỏi nội dung
+        user_message = user_message.replace(f"@{bot_username}", "").strip()
 
     try:
         chatgpt_reply = chat_with_gpt(user_id, user_message)
 
-        # Phản hồi trực tiếp vào tin nhắn đó (reply thread)
+        # Phản hồi trực tiếp vào tin nhắn
         message.reply_text(
             chatgpt_reply,
             reply_to_message_id=message.message_id
         )
     except Exception as e:
         message.reply_text("⚠️ Lỗi xử lý: " + str(e), reply_to_message_id=message.message_id)
+
 
 # Khởi động bot
 def main():
