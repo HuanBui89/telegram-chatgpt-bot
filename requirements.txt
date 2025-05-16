@@ -1,2 +1,7 @@
-openai==0.28.1
-python-telegram-bot==13.15
+python-telegram-bot==20.3
+openai>=1.0.0
+googletrans==4.0.0-rc1
+python-dotenv>=0.19.0
+httpx>=0.23.0
+sqlite3>=2.6.0  # Thường có sẵn trong Python
+Pillow>=9.0.0  # Để xử lý ảnh (nếu cần)
