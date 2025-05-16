@@ -11,7 +11,6 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-import translators as ts
 from datetime import datetime
 
 # Cấu hình logging
@@ -72,9 +71,6 @@ def save_message(user_id, role, content):
 # Trả lời bằng ChatGPT
 async def chat_with_gpt(user_id, message):
     try:
-        # Dịch sang tiếng Việt nếu cần
-        detected = ts.detect(message)  # Sử dụng translators
-        if detected[0] != 'vi':  # detected trả về tuple (lang, confidence)
             processed_text = ts.translate(message, to_language='vi')
             logger.info(f"Translated {detected[0]} to vi: {message} -> {processed_text}")
         else:
@@ -83,7 +79,7 @@ async def chat_with_gpt(user_id, message):
         base_prompt = {
             "role": "system",
             "content": (
-                "Bạn là trợ lý Gen Z thân thiện. Trả lời ngắn gọn, vui vẻ, dùng emoji. "
+                "Bạn là trợ lý Gen Z thân thiện của anh Huân Cute Phô Mai Que . Trả lời ngắn gọn, vui vẻ, dùng emoji. "
                 "Không máy móc. Nếu hỏi về ngôn ngữ, nhắc rằng bạn hiểu đa ngôn ngữ."
             )
         }
