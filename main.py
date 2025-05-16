@@ -11,15 +11,7 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-# Thay thế
-from googletrans import Translator
-translator = Translator()
-
-# Bằng
 import translators as ts
-
-# Khi cần dịch
-translated_text = ts.translate(text, to_language='vi')
 from datetime import datetime
 
 # Cấu hình logging
@@ -83,10 +75,10 @@ def save_message(user_id, role, content):
 async def chat_with_gpt(user_id, message):
     try:
         # Dịch sang tiếng Việt nếu cần
-        detected = translator.detect(message)
+        detected = ts.detect(message)  # Sử dụng translators thay vì googletrans
         if detected.lang != 'vi':
-            translated = translator.translate(message, dest='vi')
-            processed_text = translated.text
+            translated = ts.translate(message, to_language='vi')  # Sửa cách gọi
+            processed_text = translated
             logger.info(f"Translated {detected.lang} to vi: {message} -> {processed_text}")
         else:
             processed_text = message
