@@ -71,11 +71,7 @@ def save_message(user_id, role, content):
 # Trả lời bằng ChatGPT
 async def chat_with_gpt(user_id, message):
     try:
-            processed_text = ts.translate(message, to_language='vi')
-            logger.info(f"Translated {detected[0]} to vi: {message} -> {processed_text}")
-        else:
-            processed_text = message
-
+        processed_text = message
         base_prompt = {
             "role": "system",
             "content": (
