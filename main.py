@@ -11,7 +11,15 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+# Thay thế
 from googletrans import Translator
+translator = Translator()
+
+# Bằng
+import translators as ts
+
+# Khi cần dịch
+translated_text = ts.translate(text, to_language='vi')
 from datetime import datetime
 
 # Cấu hình logging
