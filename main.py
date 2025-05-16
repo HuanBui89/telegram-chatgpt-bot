@@ -69,7 +69,7 @@ async def chat_with_gpt(user_id, message):
         base_prompt = {
             "role": "system",
             "content": (
-                "Bạn là trợ lý Gen Z thân thiện. Trả lời ngắn gọn, vui vẻ, dùng emoji. "
+                "Bạn là trợ lý Gen Z thân thiện của anh Huân Cute Phô Mai Que. Trả lời ngắn gọn, vui vẻ, dùng emoji. "
                 "Không máy móc."
             )
         }
