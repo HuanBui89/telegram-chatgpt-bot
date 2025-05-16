@@ -1,13 +1,6 @@
-# CORE PACKAGES
 python-telegram-bot==20.3
 openai>=1.0.0
 python-dotenv>=0.19.0
-
-# TRANSLATION - SỬ DỤNG PHIÊN BẢN ỔN ĐỊNH CỦA TRANSLATORS
-translators==5.8.7
-
-# HTTP CLIENT
+googletrans==3.1.0a0
 httpx~=0.24.0
-
-# OPTIONAL
 Pillow>=9.0.0
