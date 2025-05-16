@@ -26,8 +26,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# Khởi tạo translator
-translator = Translator()
 
 # Sticker vui
 STICKERS = [
@@ -75,11 +73,10 @@ def save_message(user_id, role, content):
 async def chat_with_gpt(user_id, message):
     try:
         # Dịch sang tiếng Việt nếu cần
-        detected = ts.detect(message)  # Sử dụng translators thay vì googletrans
-        if detected.lang != 'vi':
-            translated = ts.translate(message, to_language='vi')  # Sửa cách gọi
-            processed_text = translated
-            logger.info(f"Translated {detected.lang} to vi: {message} -> {processed_text}")
+        detected = ts.detect(message)  # Sử dụng translators
+        if detected[0] != 'vi':  # detected trả về tuple (lang, confidence)
+            processed_text = ts.translate(message, to_language='vi')
+            logger.info(f"Translated {detected[0]} to vi: {message} -> {processed_text}")
         else:
             processed_text = message
 
