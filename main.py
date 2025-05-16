@@ -3,6 +3,7 @@ import openai
 import random
 import logging
 import sqlite3
+from openai import OpenAI
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -20,19 +21,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Lấy token từ biến môi trường
+# Khởi tạo OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Các hằng số
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
-
-
-# Sticker vui
 STICKERS = [
     "CAACAgUAAxkBAAEKoHhlg1I4Q2w4o0zMSrcjC3fycqQZlwACRQEAApbW6FYttxIfTrbN6jQE",
     "CAACAgUAAxkBAAEKoH1lg1JY1LtONXyA-VOFe4LEBd6gxgACawEAApbW6FYP4EL9Hx_aVjQE"
 ]
-
-# Gợi ý khi không biết nói gì
 SUGGESTIONS = [
     "Kể cho mình nghe về một ngày của bạn đi!",
     "Bạn cần giúp gì không? Mình có thể tìm thông tin, tạo ảnh, hay chỉ đơn giản là trò chuyện 😊",
@@ -58,7 +55,6 @@ def init_db():
 
 init_db()
 
-# Lưu tin nhắn vào database
 def save_message(user_id, role, content):
     conn = sqlite3.connect('chat_history.db')
     c = conn.cursor()
@@ -68,19 +64,16 @@ def save_message(user_id, role, content):
     conn.commit()
     conn.close()
 
-# Trả lời bằng ChatGPT
 async def chat_with_gpt(user_id, message):
     try:
-        processed_text = message
         base_prompt = {
             "role": "system",
             "content": (
-                "Bạn là trợ lý Gen Z thân thiện của anh Huân Cute Phô Mai Que . Trả lời ngắn gọn, vui vẻ, dùng emoji. "
-                "Không máy móc. Nếu hỏi về ngôn ngữ, nhắc rằng bạn hiểu đa ngôn ngữ."
+                "Bạn là trợ lý Gen Z thân thiện. Trả lời ngắn gọn, vui vẻ, dùng emoji. "
+                "Không máy móc."
             )
         }
 
-        # Lấy lịch sử từ database
         conn = sqlite3.connect('chat_history.db')
         c = conn.cursor()
         c.execute("SELECT role, content FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10", (user_id,))
@@ -88,15 +81,15 @@ async def chat_with_gpt(user_id, message):
         conn.close()
 
         messages = [base_prompt] + history
-        messages.append({"role": "user", "content": processed_text})
+        messages.append({"role": "user", "content": message})
 
-        response = await openai.ChatCompletion.acreate(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages,
             temperature=0.7
         )
 
-        reply = response.choices[0].message.content.strip()
+        reply = response.choices[0].message.content
         save_message(user_id, "user", message)
         save_message(user_id, "assistant", reply)
         return reply
@@ -105,7 +98,6 @@ async def chat_with_gpt(user_id, message):
         logger.error(f"GPT error: {str(e)}")
         return f"❌ Lỗi chatbot: {str(e)}"
 
-# Lệnh /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
 🤖 Bot Help Guide:
@@ -117,7 +109,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(help_text)
 
-# Lệnh /reset
 async def reset_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     try:
@@ -131,7 +122,6 @@ async def reset_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Reset error: {str(e)}")
         await update.message.reply_text("❌ Lỗi khi reset lịch sử")
 
-# Lệnh /draw
 async def draw_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args)
     if not prompt:
@@ -142,13 +132,13 @@ async def draw_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🖌️ Đợi xíu tui vẽ hình xịn cho nè...", quote=True)
         save_message(update.message.from_user.id, "user", f"/draw {prompt}")
 
-        response = await openai.Image.acreate(
+        response = client.images.generate(
             prompt=f"{prompt}, anime style, colorful",
             n=1,
             size="512x512"
         )
 
-        image_url = response["data"][0]["url"]
+        image_url = response.data[0].url
         await context.bot.send_photo(
             chat_id=update.message.chat.id,
             photo=image_url,
@@ -157,20 +147,16 @@ async def draw_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         save_message(update.message.from_user.id, "assistant", f"[IMAGE] {prompt}")
 
-    except openai.error.InvalidRequestError:
-        await update.message.reply_text("❌ Nội dung không phù hợp để tạo ảnh")
     except Exception as e:
         logger.error(f"Draw error: {str(e)}")
         await update.message.reply_text(f"❌ Lỗi khi tạo ảnh: {str(e)}")
 
-# Xử lý tin nhắn
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user_id = message.from_user.id
     user_text = message.text.strip()
     bot_username = (await context.bot.get_me()).username
 
-    # Kiểm tra trong group
     is_group = message.chat.type in ['group', 'supergroup']
     is_tagged = f"@{bot_username}" in message.text
     is_reply_to_bot = (
@@ -185,12 +171,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = user_text.replace(f"@{bot_username}", "").strip()
 
     try:
-        # Gợi ý khi tin nhắn quá ngắn
         if len(user_text) < 2:
             await message.reply_text(random.choice(SUGGESTIONS))
             return
 
-        # Xử lý lời chào
         greetings = ["hi", "hello", "chào", "yo", "alo", "hey", "hê"]
         if user_text.lower().split()[0] in greetings:
             await message.reply_text(random.choice([
@@ -200,7 +184,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]))
             return
 
-        # Gửi sticker khi phát hiện tin troll
         troll_words = ["=))", "haha", "kkk", ":v", "🤣", "troll", "đùa"]
         if any(word in user_text.lower() for word in troll_words):
             await context.bot.send_sticker(
@@ -209,7 +192,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_to_message_id=message.message_id
             )
 
-        # Trả lời bằng GPT
         reply = await chat_with_gpt(user_id, user_text)
         await message.reply_text(reply, reply_to_message_id=message.message_id)
 
@@ -217,17 +199,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Message error: {str(e)}")
         await message.reply_text("⚠️ Bot bị lỗi, thử lại sau nha!", reply_to_message_id=message.message_id)
 
-# Chạy bot
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Thêm handlers
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("reset", reset_history))
     application.add_handler(CommandHandler("draw", draw_image))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Bắt đầu bot
     logger.info("Bot is starting...")
     application.run_polling()
 
