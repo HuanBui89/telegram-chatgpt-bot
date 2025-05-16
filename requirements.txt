@@ -1,13 +1,13 @@
 # CORE PACKAGES
-python-telegram-bot==20.3  # Framework Telegram Bot (phiên bản ổn định)
-openai>=1.0.0              # API OpenAI (hỗ trợ cả ChatGPT và DALL·E)
-python-dotenv>=0.19.0      # Đọc biến môi trường từ file .env
-httpx>=0.23.0             # HTTP client cho các request API
+python-telegram-bot==20.3
+openai>=1.0.0
+python-dotenv>=0.19.0
 
-# TRANSLATION (Chọn 1 trong 2 options bên dưới)
-googletrans==3.1.0a0       # Option 1: Thư viện dịch thuật (phiên bản ổn định hơn)
-# translators==6.0.0       # Option 2: Thay thế nếu googletrans gặp lỗi
+# TRANSLATION - SỬ DỤNG TRANSLATORS THAY VÌ GOOGLETRANS
+translators==6.0.0
 
-# OPTIONAL (Bổ sung khi cần)
-Pillow>=9.0.0              # Xử lý ảnh (resize/watermark)
-# speechrecognition>=3.8.1 # Xử lý voice message (bổ sung sau)
+# HTTP CLIENT (phiên bản tương thích)
+httpx~=0.24.0
+
+# OPTIONAL
+Pillow>=9.0.0
