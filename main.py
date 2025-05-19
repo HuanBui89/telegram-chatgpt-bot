@@ -4,7 +4,7 @@ import random
 import logging
 import sqlite3
 from openai import OpenAI
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
     MessageHandler,
@@ -54,7 +54,6 @@ def init_db():
     conn.close()
 
 init_db()
-await application.bot.send_message(chat_id=SOME_CHAT_ID, text="...", reply_markup=ReplyKeyboardRemove())
 
 def save_message(user_id, role, content):
     conn = sqlite3.connect('chat_history.db')
