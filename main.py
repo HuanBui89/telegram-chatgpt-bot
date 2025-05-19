@@ -54,6 +54,7 @@ def init_db():
     conn.close()
 
 init_db()
+await application.bot.send_message(chat_id=SOME_CHAT_ID, text="...", reply_markup=ReplyKeyboardRemove())
 
 def save_message(user_id, role, content):
     conn = sqlite3.connect('chat_history.db')
