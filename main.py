@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 import openai
-from telegram import Update, ChatAction
+from telegram import Update
+from telegram.constants import ChatAction
+
 from telegram.ext import (
     Application,
     CommandHandler,
