@@ -6,11 +6,12 @@ import aiosqlite
 import random
 from datetime import datetime, timedelta
 from functools import wraps
+import base64
+import io
 
 import openai
-from telegram import Update
+from telegram import Update, InputFile
 from telegram.constants import ChatAction
-
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DB_PATH = os.environ.get("DB_PATH", "chat_history.db")
-# Optional: override model names via env
+
+# Model names (you can change)
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gpt-3.5-turbo")
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gpt-image-1")
 
@@ -38,14 +40,23 @@ if not OPENAI_API_KEY or not TELEGRAM_TOKEN:
     logger.error("OPENAI_API_KEY and TELEGRAM_TOKEN must be set in environment.")
     raise SystemExit("Missing environment variables")
 
-# OpenAI client
+# Create OpenAI client
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# Small UX texts
+# -------------------------
+# Global Natural Mode
+# -------------------------
+# Set to True to force the assistant to answer in a natural, conversational, human-like style,
+# proactively continue previous topics, and avoid canned "Do you need anything else?" patterns.
+GLOBAL_NATURAL_MODE = True
+
+# -------------------------
+# UX texts / stickers
+# -------------------------
 SUGGESTIONS = [
-    "Bạn cần giúp gì? Mình có thể tìm thông tin, tạo ảnh, hoặc trò chuyện 😊",
-    "Thử gõ /draw [mô tả] để mình vẽ ảnh AI cho bạn!",
-    "Kể mình nghe một chuyện thú vị đi 😄",
+    "Bạn cần gì cứ nói, mình sẽ trả lời thoải mái, tự nhiên như người thật nhé 😊",
+    "Muốn vẽ gì thì /draw [mô tả] — mình vẽ luôn cho!",
+    "Bạn muốn mình tra cứu giá, tin tức, hay làm thơ? Gõ luôn đi."
 ]
 
 STICKERS = [
@@ -53,12 +64,12 @@ STICKERS = [
     "CAACAgUAAxkBAAEKoH1lg1JY1LtONXyA-VOFe4LEBd6gxgACawEAApbW6FYP4EL9Hx_aVjQE",
 ]
 
-# Rate limiting in-memory (simple)
-USER_COOLDOWN = {}  # user_id -> datetime of allowed next request
-COOLDOWN_SECONDS = 1.0  # small per-message throttle
+# Rate limiting
+USER_COOLDOWN = {}
+COOLDOWN_SECONDS = 0.6
 
 # -------------------------
-# DB helpers (aiosqlite)
+# Database (aiosqlite)
 # -------------------------
 CREATE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -85,6 +96,7 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_conv_user_time ON conversations(user_id, timestamp DESC);")
         await db.commit()
 
+# initialize DB
 asyncio.get_event_loop().run_until_complete(init_db())
 
 async def save_message(user_id: int, role: str, content: str):
@@ -96,14 +108,13 @@ async def save_message(user_id: int, role: str, content: str):
         )
         await db.commit()
 
-async def fetch_recent_history(user_id: int, limit: int = 20):
+async def fetch_recent_history(user_id: int, limit: int = 25):
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT role, content, timestamp FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
             (user_id, limit),
         )
         rows = await cur.fetchall()
-        # return oldest->newest (reverse)
         return [{"role": r[0], "content": r[1], "timestamp": r[2]} for r in reversed(rows)]
 
 async def clear_history(user_id: int):
@@ -112,7 +123,7 @@ async def clear_history(user_id: int):
         await db.commit()
 
 # -------------------------
-# Utility: rate limit decorator
+# Rate-limit decorator
 # -------------------------
 def rate_limited(func):
     @wraps(func)
@@ -121,119 +132,116 @@ def rate_limited(func):
         now = datetime.utcnow()
         allowed_at = USER_COOLDOWN.get(user_id, now)
         if now < allowed_at:
-            # silently drop spammy messages (or send quick hint)
             return
         USER_COOLDOWN[user_id] = now + timedelta(seconds=COOLDOWN_SECONDS)
         return await func(update, context, *args, **kwargs)
     return wrapper
 
 # -------------------------
-# Web search integration (async stub)
+# Web search (async stub)
 # -------------------------
-# IMPORTANT: Replace google_search_async with your real async implementation.
+# You should implement this function to actually query a web search API (SerpAPI, Google Custom, Bing, etc.)
+# Return a short aggregated text (string) summarizing top findings (title + 1-2 lines each), or "" if none.
 async def google_search_async(query: str) -> str:
-    # Example stub: in production call an async http client (aiohttp) to your search service
+    # Example placeholder: Implement using aiohttp + your preferred search API
+    # For example, call SerpAPI or a cached endpoint and return concise summary string.
     await asyncio.sleep(0.01)
-    return ""  # return empty string if no web result
+    return ""  # default: no web result
 
-# Heuristic to decide if web search is needed
+# Heuristic to decide whether to perform web search
 def needs_web_search(query: str) -> bool:
-    # simple heuristic: words like "mới", "tin", "giá", "bao nhiêu", "ngày hôm nay", "CEO", "giải thưởng", "lịch"
-    lower = query.lower()
-    triggers = ["mới", "giá", "bao nhiêu", "hôm nay", "tin", "CEO", "giải", "lịch", "điều lệ", "luật", "số liệu"]
+    lower = (query or "").lower()
+    triggers = ["hôm nay", "giá", "bao nhiêu", "mấy giờ", "tin", "giá vàng", "lăn bánh", "giá xe", "giá xăng", "tỷ giá", "CEO", "luật", "điều", "biểu giá"]
     return any(t in lower for t in triggers)
 
 # -------------------------
-# Prompt & summarization helpers
+# Prompt design (Natural mode)
 # -------------------------
 SYSTEM_PROMPT = (
-    "Bạn là một trợ lý tiếng Việt thông minh, thân thiện, dí dỏm (Gen Z style) cho anh Huân. "
-    "Trả lời ngắn gọn, rõ ràng, thích ứng với bối cảnh. "
-    "Khi cần, hỏi thêm 1 câu để làm rõ. Dùng emoji phù hợp, nhưng không lạm dụng. "
-    "Nếu trả lời liên quan đến dữ liệu hoặc tin tức có thể thay đổi theo thời gian, nói 'Mình sẽ kiểm tra' rồi thực hiện web search nếu cần."
+    "Bạn là một trợ lý siêu thông minh, tự nhiên, trò chuyện như người thật, "
+    "nhạy bén trong ngữ cảnh, biết gợi mở và nối chủ đề cũ khi phù hợp. "
+    "Trả lời bằng tiếng Việt trôi chảy, có thể dùng emoji, không lặp câu hỏi 'Bạn cần gì nữa?' trừ khi thật sự cần làm rõ. "
+    "Nếu cần thông tin thời sự hoặc dữ liệu có thể thay đổi, thực hiện web search và trích nguồn ngắn gọn. "
+    "Khi người dùng hỏi về giá/ dữ liệu cần xác thực (ví dụ: 'giá vàng hôm nay'), hãy nói bạn sẽ kiểm tra và sau đó trả lời cập nhật."
 )
 
-# If conversation history too long by characters, ask model to summarize (keeps context)
+# If history too long, compress it
 MAX_HISTORY_CHARS = 3000
 
 async def maybe_summarize_history(history_messages):
-    # history_messages: list of {"role","content"}
     joined = "\n".join([f"{m['role']}: {m['content']}" for m in history_messages])
     if len(joined) <= MAX_HISTORY_CHARS:
-        return history_messages  # no need
-    # Summarize via a short GPT call to compress prior context:
+        return history_messages
+    # Ask model to summarize (sync openai call used here — it's fine but keep tokens controlled)
     prompt = [
-        {"role": "system", "content": "Bạn là một trợ lý tóm tắt hội thoại."},
-        {"role": "user", "content": "Tóm tắt ngắn (3-5 dòng) nội dung chính của đoạn hội thoại sau, giữ các thông tin quan trọng: \n\n" + joined}
+        {"role": "system", "content": "Bạn là 1 trợ lý tóm tắt hội thoại. Tóm tắt ngắn gọn 3-6 dòng, giữ các điểm quan trọng."},
+        {"role": "user", "content": "Hội thoại cần tóm tắt:\n\n" + joined}
     ]
     try:
-        resp = client.chat.completions.create(model=CHAT_MODEL, messages=prompt, temperature=0.2)
+        resp = client.chat.completions.create(model=CHAT_MODEL, messages=prompt, temperature=0.2, max_tokens=200)
         summary = resp.choices[0].message.content.strip()
-        compressed = [{"role": "system", "content": "[TÓM TẮT LỊCH SỬ] " + summary}]
-        return compressed
-    except Exception as e:
-        logger.exception("Error summarizing history")
-        # fallback: return last N messages only
-        return history_messages[-10:]
+        return [{"role": "system", "content": "[TÓM TẮT LỊCH SỬ] " + summary}]
+    except Exception:
+        # fallback: last 12 messages
+        return history_messages[-12:]
 
 # -------------------------
-# Chat with OpenAI
+# Chat with OpenAI (main)
 # -------------------------
 async def chat_with_gpt(user_id: int, user_message: str):
     try:
-        # fetch history from DB
-        raw_history = await fetch_recent_history(user_id, limit=30)  # returns list of dicts old->new
+        raw_history = await fetch_recent_history(user_id, limit=30)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        # map DB rows to assistant/user roles (already stored)
         history_msgs = [{"role": r["role"], "content": r["content"]} for r in raw_history]
         history_msgs = await maybe_summarize_history(history_msgs)
         messages.extend(history_msgs)
 
-        # check web needs
+        # Web search if heuristic triggered
         web_text = ""
         if needs_web_search(user_message):
             web_text = await google_search_async(user_message)
             if web_text:
                 messages.append({"role": "system", "content": f"[WEB SEARCH RESULT]\n{web_text}"})
-                # log web result
                 await save_message(user_id, "system", f"[WEB SEARCH]\n{web_text}")
+
+        # If global natural mode, inform model to continue thread if possible
+        if GLOBAL_NATURAL_MODE:
+            # an instruction to keep thread continuity and be proactive
+            messages.append({"role": "system", "content": "[NATURAL_MODE_ON] Hãy trả lời tự nhiên, gợi mở tiếp chủ đề nếu phù hợp."})
 
         messages.append({"role": "user", "content": user_message})
 
-        # Control max tokens via reasonable defaults
         response = client.chat.completions.create(
             model=CHAT_MODEL,
             messages=messages,
-            temperature=0.6,
-            max_tokens=800,
+            temperature=0.7,
+            max_tokens=900,
         )
 
         reply = response.choices[0].message.content.strip()
-        # Save user & assistant messages
+        # Save conversation
         await save_message(user_id, "user", user_message)
         await save_message(user_id, "assistant", reply)
         return reply
-
     except Exception as e:
         logger.exception("OpenAI chat error")
-        return "❌ Mình bị lỗi khi xử lý. Thử lại nhé."
+        return "Xin lỗi, mình gặp lỗi khi xử lý. Thử lại nhé."
 
 # -------------------------
-# /draw command (image generation)
+# Image generation
 # -------------------------
 async def generate_image(prompt: str):
     try:
         resp = client.images.generate(model=IMAGE_MODEL, prompt=prompt, size="1024x1024", n=1)
-        # This API may return either a url or b64, adapt as needed:
         data = resp.data[0]
-        # image may be 'url' or 'b64_json'
+        # try url
         if hasattr(data, "url") and data.url:
-            return data.url
+            return {"type": "url", "data": data.url}
         if "b64_json" in data:
-            return data["b64_json"]
+            return {"type": "b64", "data": data["b64_json"]}
         # fallback
         return None
-    except Exception as e:
+    except Exception:
         logger.exception("Image generation error")
         return None
 
@@ -242,53 +250,50 @@ async def generate_image(prompt: str):
 # -------------------------
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    await update.message.reply_text(
-        f"Xin chào {user.first_name}! Mình là trợ lý ảo — gõ gì đó đi nhé. Gõ /help để xem lệnh."
+    txt = (
+        f"Xin chào {user.first_name}! Mình đang chạy ở chế độ tự nhiên — trả lời tự nhiên, "
+        "liên kết chủ đề cũ, có thể tra web khi cần. Gõ /help để xem lệnh."
     )
+    await update.message.reply_text(txt)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Hướng dẫn:\n"
-        "- Chat trực tiếp để hỏi.\n"
-        "- /reset : xóa lịch sử.\n"
-        "- /draw [mô tả] : tạo ảnh AI.\n"
-        "- Gửi 'hi' để nhận lời chào vui vẻ.\n"
+        "Các lệnh:\n"
+        "/start - bắt đầu\n"
+        "/help - trợ giúp\n"
+        "/reset - xóa lịch sử\n"
+        "/draw [mô tả] - tạo ảnh AI\n\n"
+        "Mình trả lời tự nhiên và chủ động nối chủ đề. Hỏi thoải mái nhé!"
     )
 
 async def reset_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await clear_history(user_id)
-    await update.message.reply_text("🧹 Đã xóa lịch sử chat của bạn rồi. Bắt đầu lại nhé!")
+    await update.message.reply_text("🧹 Đã xóa lịch sử của bạn. Bắt đầu lại nhé!")
 
 @rate_limited
 async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
     if not context.args:
-        await update.message.reply_text("🎨 Gõ: /draw [mô tả]. Ví dụ: /draw Người phụ nữ mặc áo dài ngồi trong quán cà phê")
+        await update.message.reply_text("Gõ: /draw [mô tả]. Ví dụ: /draw người phụ nữ mặc áo dài uống cà phê ở sân vườn")
         return
     prompt = " ".join(context.args)
-    await update.message.reply_text("🖌️ Đang tạo ảnh... (có thể mất vài giây)")
-    # send typing action
+    await update.message.reply_text("Đang tạo ảnh... ⏳")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
-    image_ref = await generate_image(prompt)
-    if not image_ref:
-        await update.message.reply_text("❌ Không tạo được ảnh. Thử mô tả khác nhé.")
+    res = await generate_image(prompt)
+    if not res:
+        await update.message.reply_text("Không tạo được ảnh, thử mô tả khác nhé.")
         return
-    # If image_ref looks like base64, we could decode and send; for simplicity assume URL:
     try:
-        if image_ref.startswith("http"):
-            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=image_ref, caption=f"✨ Ảnh: {prompt}")
+        if res["type"] == "url":
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=res["data"], caption=f"✨ {prompt}")
         else:
-            # assume base64
-            import base64, io
-            from telegram import InputFile
-            img_bytes = base64.b64decode(image_ref)
+            img_bytes = base64.b64decode(res["data"])
             bio = io.BytesIO(img_bytes)
             bio.name = "image.png"
             bio.seek(0)
-            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(bio), caption=f"✨ Ảnh: {prompt}")
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=InputFile(bio), caption=f"✨ {prompt}")
     except Exception:
-        await update.message.reply_text("❌ Gửi ảnh lỗi. Bạn có thể thử lại.")
+        await update.message.reply_text("Gửi ảnh lỗi. Bạn có thể thử lại sau.")
 
 @rate_limited
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -298,26 +303,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # Group handling: only respond when mentioned or replied
+    # Group logic: respond only if mentioned or replied-to
     bot_username = (await context.bot.get_me()).username
     is_group = msg.chat.type in ['group', 'supergroup']
     is_tagged = f"@{bot_username}" in text
     is_reply_to_bot = msg.reply_to_message and (msg.reply_to_message.from_user and msg.reply_to_message.from_user.username == bot_username)
-
     if is_group and not (is_tagged or is_reply_to_bot):
-        return  # ignore other group chatter
+        return
 
-    # Basic greetings shortcut
+    # greetings shortcuts
     greetings = ["hi", "hello", "chào", "alo", "hey", "yo"]
     if text.split()[0].lower() in greetings:
         await msg.reply_text(random.choice([
-            "👋 Chào bạn! Mình ở đây nè~",
-            "🙋‍♀️ Xin chào! Mình có thể giúp gì?",
-            "🤗 Hehe, chào cưng! Nói gì đi nào."
+            "👋 Chào! Mình đang ở đây, muốn bắt đầu bằng chủ đề nào?",
+            "Xin chào! Kể mình nghe bạn đang làm gì hôm nay nhé.",
+            "Chào bạn! Muốn hỏi gì thì cứ nói thôi."
         ]))
         return
 
-    # Troll reaction: send sticker
+    # playful sticker on troll words
     troll_words = ["=))", "haha", ":v", "🤣", "troll", "đùa"]
     if any(t in text.lower() for t in troll_words):
         try:
@@ -325,28 +329,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # Show typing
+    # typing indicator
     await context.bot.send_chat_action(chat_id=msg.chat.id, action=ChatAction.TYPING)
-    # Query GPT
+
+    # Compose reply
     reply = await chat_with_gpt(user_id, text)
-    # Send reply
+
+    # Send reply (use reply_to)
     await msg.reply_text(reply, reply_to_message_id=msg.message_id)
 
 # -------------------------
-# Main
+# Run bot
 # -------------------------
 def main():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    # Commands
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("reset", reset_history))
-    application.add_handler(CommandHandler("draw", draw_command))
-    # Messages
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("reset", reset_history))
+    app.add_handler(CommandHandler("draw", draw_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("Bot starting...")
-    application.run_polling()
+    logger.info("Bot is starting (Natural Mode=%s) ..." % GLOBAL_NATURAL_MODE)
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
