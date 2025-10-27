@@ -33,7 +33,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DB_PATH = os.environ.get("DB_PATH", "chat_history.db")
 
 # Model names (you can change)
-CHAT_MODEL = os.environ.get("CHAT_MODEL", "gpt-3.5-turbo")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "gpt-4o")
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gpt-image-1")
 
 if not OPENAI_API_KEY or not TELEGRAM_TOKEN:
