@@ -186,8 +186,11 @@ async def maybe_summarize_history(history_messages):
         return history_messages[-12:]
 
 # -------------------------
-# Chat with OpenAI (main)
+# Chat with OpenAI (main) - improved: detailed logging + run in thread (non-blocking)
 # -------------------------
+import traceback
+import openai
+
 async def chat_with_gpt(user_id: int, user_message: str):
     try:
         raw_history = await fetch_recent_history(user_id, limit=30)
@@ -204,46 +207,91 @@ async def chat_with_gpt(user_id: int, user_message: str):
                 messages.append({"role": "system", "content": f"[WEB SEARCH RESULT]\n{web_text}"})
                 await save_message(user_id, "system", f"[WEB SEARCH]\n{web_text}")
 
-        # If global natural mode, inform model to continue thread if possible
         if GLOBAL_NATURAL_MODE:
-            # an instruction to keep thread continuity and be proactive
             messages.append({"role": "system", "content": "[NATURAL_MODE_ON] Hãy trả lời tự nhiên, gợi mở tiếp chủ đề nếu phù hợp."})
 
         messages.append({"role": "user", "content": user_message})
 
-        response = client.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=900,
-        )
+        # Run blocking OpenAI call in a thread to avoid blocking event loop
+        def do_call():
+            return client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=900,
+            )
 
-        reply = response.choices[0].message.content.strip()
+        try:
+            response = await asyncio.to_thread(do_call)
+        except Exception as e:
+            # log full traceback and return a useful message
+            logger.exception("OpenAI API call failed (threaded)")
+            tb = traceback.format_exc()
+            logger.error(tb)
+            # If it's an OpenAI exception, show concise info to user for debugging (but avoid leaking secrets)
+            err_msg = str(e)
+            return f"⚠️ Lỗi khi gọi OpenAI: {type(e).__name__}: {err_msg[:300]}"
+
+        # parse response robustly
+        try:
+            # new SDK returns choices[...] with message.content
+            reply = response.choices[0].message.content.strip()
+        except Exception:
+            # try alternative shapes
+            try:
+                reply = response.choices[0].text.strip()
+            except Exception:
+                logger.exception("Failed to parse OpenAI response structure. Response repr:")
+                logger.error(repr(response))
+                return "⚠️ Mình nhận được phản hồi không hợp lệ từ OpenAI. Kiểm tra log server."
+
         # Save conversation
         await save_message(user_id, "user", user_message)
         await save_message(user_id, "assistant", reply)
         return reply
+
     except Exception as e:
-        logger.exception("OpenAI chat error")
-        return "Xin lỗi, mình gặp lỗi khi xử lý. Thử lại nhé."
+        # Catch-all: log full traceback so bạn biết nguyên nhân
+        logger.exception("Unhandled error in chat_with_gpt")
+        tb = traceback.format_exc()
+        logger.error(tb)
+        return f"Xin lỗi, mình gặp lỗi khi xử lý: {type(e).__name__}: {str(e)[:200]}"
 
 # -------------------------
-# Image generation
+# Image generation - run in thread + detailed logging
 # -------------------------
 async def generate_image(prompt: str):
     try:
-        resp = client.images.generate(model=IMAGE_MODEL, prompt=prompt, size="1024x1024", n=1)
-        data = resp.data[0]
-        # try url
-        if hasattr(data, "url") and data.url:
-            return {"type": "url", "data": data.url}
-        if "b64_json" in data:
-            return {"type": "b64", "data": data["b64_json"]}
-        # fallback
-        return None
+        def do_img_call():
+            return client.images.generate(model=IMAGE_MODEL, prompt=prompt, size="1024x1024", n=1)
+
+        try:
+            resp = await asyncio.to_thread(do_img_call)
+        except Exception as e:
+            logger.exception("OpenAI Image API call failed (threaded)")
+            return None
+
+        # parse safely
+        try:
+            data = resp.data[0]
+            # new SDK: may have .url or .b64_json
+            if hasattr(data, "url") and data.url:
+                return {"type": "url", "data": data.url}
+            if hasattr(data, "b64_json") and data.b64_json:
+                return {"type": "b64", "data": data.b64_json}
+            if isinstance(data, dict) and "b64_json" in data:
+                return {"type": "b64", "data": data["b64_json"]}
+            logger.error("Unexpected image response shape: %r", resp)
+            return None
+        except Exception:
+            logger.exception("Failed to parse image response")
+            logger.error(repr(resp))
+            return None
+
     except Exception:
         logger.exception("Image generation error")
         return None
+
 
 # -------------------------
 # Handlers
