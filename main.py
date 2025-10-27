@@ -1,15 +1,12 @@
-# main.py
 import os
 import asyncio
 import logging
 import aiosqlite
-import random
 from datetime import datetime, timedelta
 from functools import wraps
 import base64
 import io
-
-import openai
+from openai import OpenAI
 from telegram import Update, InputFile
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -32,7 +29,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 DB_PATH = os.environ.get("DB_PATH", "chat_history.db")
 
-# Model names (you can change)
+# Model names
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gpt-4o")
 IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "gpt-image-1")
 
@@ -40,8 +37,8 @@ if not OPENAI_API_KEY or not TELEGRAM_TOKEN:
     logger.error("OPENAI_API_KEY and TELEGRAM_TOKEN must be set in environment.")
     raise SystemExit("Missing environment variables")
 
-# Create OpenAI client
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+# ✅ Create OpenAI client (API v1)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -------------------------
 # Global Natural Mode
